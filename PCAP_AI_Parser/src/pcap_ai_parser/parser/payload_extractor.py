@@ -5,7 +5,7 @@ Payload extraction logic for L4/L7 protocols (HTTP, DNS, TLS, Generic TCP/UDP/IC
 from dataclasses import dataclass, field
 import socket
 from typing import Optional, Dict, Any
-import dpkt
+import dpkt   # type: ignore[import-untyped]
 from pcap_ai_parser.utils.normalizer import normalize_payload_to_printable, PayloadNormalizationResult
 
 
