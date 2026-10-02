@@ -1,6 +1,7 @@
 # PCAP AI Parser
 
 > AI-powered bulk PCAP analysis pipeline using `dpkt` and `tshark`.
+
 > PacketParser-AI parses raw PCAP files, decodes headers and application payloads, normalizes binary data into printable text, and extracts statistical features for machine learning triage.
 
 ## Project Structure
