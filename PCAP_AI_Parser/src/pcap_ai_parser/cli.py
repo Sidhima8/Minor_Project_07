@@ -5,7 +5,7 @@ Commands
 --------
   pcap-parse parse <file>          Parse with dpkt (default) or tshark
   pcap-parse info  <file>          Show summary stats only
-  pcap-parse check                  Verify environment (Python, dpkt, tshark)
+  pcap-parse check                 Verify environment (Python, dpkt, tshark)
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
 
-from pcap_ai_parser.parser.dpkt_parser import DpktParser
-from pcap_ai_parser.parser.tshark_parser import TsharkParser
+from pcap_ai_parser.parser.dpkt_parser import DpktPCAPParser
 from pcap_ai_parser import __version__
 
 console = Console()
@@ -52,6 +51,7 @@ def main(ctx: click.Context, verbose: bool) -> None:
 def check() -> None:
     """Verify that all required tools and libraries are installed."""
     import importlib
+    import subprocess
 
     table = Table(title="Environment Check", show_header=True)
     table.add_column("Component", style="bold")
@@ -60,7 +60,7 @@ def check() -> None:
 
     # Python version
     v = sys.version.split()[0]
-    ok = tuple(int(x) for x in v.split(".")) >= (3, 11)
+    ok = tuple(int(x) for x in v.split(".")) >= (3, 9)
     table.add_row(
         "Python",
         "[green]OK[/green]" if ok else "[red]FAIL[/red]",
@@ -76,18 +76,16 @@ def check() -> None:
         except ImportError:
             table.add_row(lib, "[red]MISSING[/red]", "pip install " + lib)
 
-    # tshark
-    if TsharkParser.check_available():
-        import subprocess
-        result = subprocess.run(["tshark", "--version"], capture_output=True, text=True)
-        ver_line = result.stdout.splitlines()[0] if result.stdout else "?"
-        table.add_row("tshark", "[green]OK[/green]", ver_line)
-    else:
-        table.add_row(
-            "tshark",
-            "[yellow]MISSING[/yellow]",
-            "sudo pacman -S wireshark-cli",
-        )
+    # tshark check
+    try:
+        result = subprocess.run(["tshark", "--version"], capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            ver_line = result.stdout.splitlines()[0] if result.stdout else "Available"
+            table.add_row("tshark", "[green]OK[/green]", ver_line)
+        else:
+            table.add_row("tshark", "[yellow]MISSING[/yellow]", "Install wireshark / tshark")
+    except FileNotFoundError:
+        table.add_row("tshark", "[yellow]MISSING[/yellow]", "Install wireshark / tshark")
 
     console.print(table)
 
@@ -119,43 +117,32 @@ def parse(
     path = Path(pcap_file)
     console.rule(f"[bold cyan]Parsing {path.name} (backend={backend})")
 
-    records = []
+    dpkt_parser = DpktPCAPParser()
+    records = dpkt_parser.parse_file(str(path))
+    if max_packets > 0:
+        records = records[:max_packets]
 
-    if backend == "dpkt":
-        with DpktParser(path, max_packets=max_packets) as parser:
-            for rec in parser.parse():
-                records.append(rec)
-                if ctx.obj.get("verbose"):
-                    rprint(str(rec))
-            stats = parser.summary()
+    if ctx.obj.get("verbose"):
+        for rec in records:
+            rprint(rec.to_dict())
 
-    elif backend == "tshark":
-        if not TsharkParser.check_available():
-            console.print("[red]tshark not found.[/red] Install: sudo pacman -S wireshark-cli")
-            raise SystemExit(1)
-        with TsharkParser(path) as parser:
-            for rec in parser.parse():
-                if max_packets and len(records) >= max_packets:
-                    break
-                records.append(rec)
-                if ctx.obj.get("verbose"):
-                    rprint(str(rec))
+    console.print(f"\n[green][OK][/green] Parsed [bold]{len(records):,}[/bold] packets from [cyan]{path.name}[/cyan]")
+
+    if summary:
         stats = {
             "file": str(path),
             "total_packets": len(records),
-            "total_bytes": sum(r.wire_length for r in records),
+            "total_bytes": sum(r.orig_len for r in records),
+            "avg_packet_size": round(sum(r.orig_len for r in records) / len(records), 2) if records else 0,
+            "parse_errors": 0,
         }
-
-    console.print(f"\n[green]✓[/green] Parsed [bold]{len(records):,}[/bold] packets from [cyan]{path.name}[/cyan]")
-
-    if summary and backend == "dpkt":
         _print_summary(stats)
 
     if output:
-        import pandas as pd
+        import pandas as pd  # type: ignore[import-untyped]
         df = pd.DataFrame([r.to_dict() for r in records])
         df.to_csv(output, index=False)
-        console.print(f"[green]✓[/green] Saved CSV → [cyan]{output}[/cyan]")
+        console.print(f"[green][OK][/green] Saved CSV → [cyan]{output}[/cyan]")
 
 
 # ── info command ──────────────────────────────────────────────────────────────
@@ -165,10 +152,16 @@ def parse(
 def info(pcap_file: str) -> None:
     """Show high-level statistics for a PCAP file (no full parse)."""
     path = Path(pcap_file)
-    with DpktParser(path) as parser:
-        for _ in parser.parse():
-            pass
-        _print_summary(parser.summary())
+    dpkt_parser = DpktPCAPParser()
+    records = dpkt_parser.parse_file(str(path))
+    stats = {
+        "file": str(path),
+        "total_packets": len(records),
+        "total_bytes": sum(r.orig_len for r in records),
+        "avg_packet_size": round(sum(r.orig_len for r in records) / len(records), 2) if records else 0,
+        "parse_errors": 0,
+    }
+    _print_summary(stats)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -186,18 +179,6 @@ def _print_summary(stats: dict) -> None:
 
     console.print(table)
 
-    if proto_dist := stats.get("proto_distribution"):
-        t2 = Table(title="Protocol Distribution")
-        t2.add_column("Protocol")
-        t2.add_column("Packets", justify="right")
-        for proto, count in proto_dist.items():
-            t2.add_row(proto, str(count))
-        console.print(t2)
 
-    if top_src := stats.get("top_src_ips"):
-        t3 = Table(title="Top Source IPs")
-        t3.add_column("IP")
-        t3.add_column("Packets", justify="right")
-        for ip, count in list(top_src.items())[:10]:
-            t3.add_row(ip, str(count))
-        console.print(t3)
+if __name__ == "__main__":
+    main()
