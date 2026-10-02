@@ -1,3 +1,8 @@
+"""pytest configuration — shared fixtures."""
+import pytest
+
+"""or"""
+
 """
 Pytest configuration and shared fixtures.
 """
