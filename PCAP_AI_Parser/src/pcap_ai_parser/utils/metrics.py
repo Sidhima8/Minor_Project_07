@@ -20,7 +20,7 @@ def calculate_shannon_entropy(data: bytes) -> float:
         return 0.0
 
     length = len(data)
-    byte_counts = {}
+    byte_counts: dict[int, int] = {}
     for b in data:
         byte_counts[b] = byte_counts.get(b, 0) + 1
 
