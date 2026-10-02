@@ -5,7 +5,7 @@ Dpkt-based PCAP parser for bulk processing of network capture files.
 from dataclasses import dataclass, field
 import socket
 from typing import List, Optional, Dict, Any, Tuple
-import dpkt
+import dpkt  # type: ignore[import-untyped]
 from pcap_ai_parser.parser.payload_extractor import PayloadExtractor, ExtractedPayloadInfo
 
 
