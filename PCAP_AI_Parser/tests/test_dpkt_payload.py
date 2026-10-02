@@ -1,5 +1,5 @@
 """
-End-to-end unit tests for DpktPCAPParser using generated sample PCAP.
+End-to-end unit tests for DpktPCAPParser payload extractions using generated sample PCAP.
 """
 
 from pcap_ai_parser.parser.dpkt_parser import DpktPCAPParser, ParsedPacket
