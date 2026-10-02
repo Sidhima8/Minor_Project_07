@@ -20,7 +20,10 @@ from rich.table import Table
 from rich import print as rprint
 
 from pcap_ai_parser.parser.dpkt_parser import DpktPCAPParser
-from pcap_ai_parser.parser.tshark_parser import TsharkParser
+try:
+    from pcap_ai_parser.parser.tshark_parser import TsharkParser
+except ImportError:
+    TsharkParser = None  # type: ignore[assignment]
 from pcap_ai_parser import __version__
 
 console = Console()
