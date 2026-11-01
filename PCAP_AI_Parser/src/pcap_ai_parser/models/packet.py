@@ -59,6 +59,7 @@ class PacketRecord:
     app_proto: str = ""             # Best-guess: "HTTP", "DNS", "TLS", …
     payload_length: int = 0
     payload_preview: bytes = field(default_factory=bytes, repr=False)  # first 64 B
+    payload: bytes = field(default_factory=bytes, repr=False)          # full application payload
 
     # ── Parse provenance ─────────────────────────────────────────────────
     parse_backend: str = ""         # "dpkt" | "tshark"
@@ -70,6 +71,7 @@ class PacketRecord:
         """Serialise to a flat dict suitable for pandas DataFrame rows."""
         d = asdict(self)
         d.pop("payload_preview", None)   # binary — drop from tabular output
+        d.pop("payload", None)           # binary — drop from tabular output
         return d
 
     def __str__(self) -> str:

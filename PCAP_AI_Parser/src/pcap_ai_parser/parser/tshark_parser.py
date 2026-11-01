@@ -115,6 +115,11 @@ class TsharkParser:
         "_ws.col.Info",
     ]
 
+    _WINDOWS_TSHARK_PATHS = [
+        Path(r"C:\Program Files\Wireshark\tshark.exe"),
+        Path(r"C:\Program Files (x86)\Wireshark\tshark.exe"),
+    ]
+
     def __init__(
         self,
         path: str | Path,
@@ -122,7 +127,8 @@ class TsharkParser:
         extra_fields: list[str] | None = None,
     ) -> None:
         self.path = Path(path)
-        self.tshark_bin = tshark_bin
+        resolved = self.resolve_binary(tshark_bin)
+        self.tshark_bin = resolved or tshark_bin
         self._fields = self._DEFAULT_FIELDS + (extra_fields or [])
         self._proc: subprocess.Popen | None = None
 
@@ -137,9 +143,22 @@ class TsharkParser:
     # ── Validation ────────────────────────────────────────────────────────
 
     @classmethod
+    def resolve_binary(cls, tshark_bin: str = "tshark") -> str | None:
+        """Return resolved path to tshark if found, else None."""
+        if shutil.which(tshark_bin):
+            return tshark_bin
+        p = Path(tshark_bin)
+        if p.exists() and p.is_file():
+            return str(p)
+        for win_path in cls._WINDOWS_TSHARK_PATHS:
+            if win_path.exists():
+                return str(win_path)
+        return None
+
+    @classmethod
     def check_available(cls, tshark_bin: str = "tshark") -> bool:
         """Return True if tshark is installed and executable."""
-        return shutil.which(tshark_bin) is not None
+        return cls.resolve_binary(tshark_bin) is not None
 
     # ── Launch & stream ───────────────────────────────────────────────────
 

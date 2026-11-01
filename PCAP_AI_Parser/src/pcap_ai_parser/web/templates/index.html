@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PacketParser-AI — Forensic Dashboard</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            surface: {
+              DEFAULT: '#0d1117',
+              card:    '#161b22',
+              border:  '#21262d',
+              hover:   '#1c2128',
+            },
+            accent: { DEFAULT: '#58a6ff', dim: '#1f3858' },
+          },
+        },
+      },
+    };
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar              { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track        { background: #0d1117; }
+    ::-webkit-scrollbar-thumb        { background: #30363d; border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover  { background: #484f58; }
+
+    /* ── Mono font ── */
+    .mono { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      border: 1.5px dashed #30363d;
+      border-radius: 12px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone.drop-active,
+    #drop-zone:focus-within {
+      border-color: #58a6ff;
+      background: rgba(88, 166, 255, 0.04);
+    }
+
+    /* ── Severity badges ── */
+    .sev-CLEAN    { background: rgba(35,134,54,.2);  color: #3fb950; border: 1px solid rgba(35,134,54,.4);  }
+    .sev-LOW      { background: rgba(88,166,255,.15); color: #79c0ff; border: 1px solid rgba(88,166,255,.3); }
+    .sev-MEDIUM   { background: rgba(187,128,9,.2);  color: #e3b341; border: 1px solid rgba(187,128,9,.4);  }
+    .sev-HIGH     { background: rgba(218,54,51,.2);  color: #f85149; border: 1px solid rgba(218,54,51,.4);  }
+    .sev-CRITICAL { background: rgba(218,54,51,.35); color: #ff7b72; border: 1px solid rgba(218,54,51,.7);  }
+
+    /* ── Table rows ── */
+    .tbl-row { transition: background 0.1s; }
+    .tbl-row:hover { background: rgba(88,166,255,0.06); cursor: pointer; }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2.5px solid #21262d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Modal ── */
+    #modal-box { animation: modalIn 0.18s cubic-bezier(0.16,1,0.3,1); }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.96) translateY(8px); }
+      to   { opacity: 1; transform: scale(1)    translateY(0);   }
+    }
+
+    /* ── Metric cards ── */
+    .metric-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    /* ── Section cards ── */
+    .section-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #21262d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #8b949e;
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- ══════════════════════════════ NAVBAR ══════════════════════════════ -->
+<header style="border-bottom:1px solid #21262d; background:#161b22; position:sticky; top:0; z-index:50;">
+  <div style="max-width:1200px; margin:0 auto; padding:0 24px; height:56px; display:flex; align-items:center; justify-content:space-between;">
+
+    <!-- Logo -->
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:30px; height:30px; border-radius:6px; background:rgba(88,166,255,0.15); border:1px solid rgba(88,166,255,0.3); display:flex; align-items:center; justify-content:center;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+      </div>
+      <span style="font-weight:700; font-size:0.95rem; color:#e6edf3; letter-spacing:-0.01em;">
+        PacketParser<span style="color:#58a6ff;">-AI</span>
+      </span>
+      <span style="font-size:0.7rem; color:#484f58; display:none;" class="sm-show">Forensic PCAP Intelligence</span>
+    </div>
+
+    <!-- Right side -->
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div id="status-pill" style="display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px; background:#0d1117; border:1px solid #21262d; font-size:0.72rem; color:#8b949e; white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis;">
+        {% if has_data %}
+          <span style="width:6px; height:6px; border-radius:50%; background:#3fb950; flex-shrink:0;"></span>
+          <span>{{ filename }}</span>
+        {% else %}
+          <span style="width:6px; height:6px; border-radius:50%; background:#484f58; flex-shrink:0;"></span>
+          <span>No capture loaded</span>
+        {% endif %}
+      </div>
+      <div style="position:relative;">
+        <button id="export-btn" onclick="toggleExportMenu()"
+          style="padding:6px 14px; border-radius:6px; background:#21262d; border:1px solid #30363d; color:#c9d1d9; font-size:0.78rem; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:6px; transition:background 0.15s;"
+          onmouseover="this.style.background='#30363d'" onmouseout="this.style.background='#21262d'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+        <div id="export-menu" style="display:none; position:absolute; right:0; top:calc(100% + 6px); background:#161b22; border:1px solid #30363d; border-radius:8px; overflow:hidden; min-width:190px; box-shadow:0 8px 24px rgba(0,0,0,0.5); z-index:100;">
+          <button onclick="exportReport('pdf')" style="width:100%; padding:10px 14px; text-align:left; background:transparent; border:none; color:#c9d1d9; font-size:0.8rem; cursor:pointer; display:flex; align-items:center; gap:8px;"
+            onmouseover="this.style.background='#21262d'" onmouseout="this.style.background='transparent'">
+            <span style="color:#f85149;">PDF</span> Download PDF Report
+          </button>
+          <button onclick="exportReport('json')" style="width:100%; padding:10px 14px; text-align:left; background:transparent; border:none; color:#c9d1d9; font-size:0.8rem; cursor:pointer; display:flex; align-items:center; gap:8px; border-top:1px solid #21262d;"
+            onmouseover="this.style.background='#21262d'" onmouseout="this.style.background='transparent'">
+            <span style="color:#e3b341;">JSON</span> Download JSON Report
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</header>
+
+<!-- ══════════════════════════════ MAIN ══════════════════════════════ -->
+<main style="max-width:1200px; margin:0 auto; padding:32px 24px;">
+
+  <!-- ── Upload Section ── -->
+  <section id="upload-section">
+    <div id="drop-zone" tabindex="0"
+      style="padding:56px 32px; text-align:center; cursor:pointer;"
+      ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+      onclick="document.getElementById('file-input').click()">
+
+      <input type="file" id="file-input" accept=".pcap,.pcapng,.cap" style="display:none;" onchange="onFileSelect(event)" />
+
+      <div style="display:flex; flex-direction:column; align-items:center; gap:16px;">
+        <div style="width:52px; height:52px; border-radius:10px; background:#161b22; border:1px solid #30363d; display:flex; align-items:center; justify-content:center;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <div>
+          <p style="font-size:0.95rem; font-weight:600; color:#c9d1d9; margin:0 0 4px;">Drop a PCAP file here or click to browse</p>
+          <p style="font-size:0.8rem; color:#484f58; margin:0;">.pcap &nbsp;&bull;&nbsp; .pcapng &nbsp;&bull;&nbsp; .cap</p>
+        </div>
+        <button onclick="loadSample(event)"
+          style="margin-top:4px; padding:7px 18px; border-radius:6px; background:rgba(88,166,255,0.12); border:1px solid rgba(88,166,255,0.25); color:#58a6ff; font-size:0.78rem; font-weight:500; cursor:pointer; transition:background 0.15s;"
+          onmouseover="this.style.background='rgba(88,166,255,0.2)'" onmouseout="this.style.background='rgba(88,166,255,0.12)'">
+          Load Attack Traffic Demo
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="upload-loading" style="display:none; flex-direction:column; align-items:center; gap:12px; padding:40px;">
+      <div class="spinner"></div>
+      <p id="loading-text" style="font-size:0.82rem; color:#8b949e; margin:0;">Parsing capture file…</p>
+    </div>
+  </section>
+
+  <!-- ── Error banner ── -->
+  <div id="error-banner" style="display:none; background:rgba(218,54,51,0.1); border:1px solid rgba(218,54,51,0.4); border-radius:8px; padding:14px 18px; margin-top:16px; display:none; align-items:flex-start; gap:10px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="#f85149" style="flex-shrink:0; margin-top:1px;"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zm0-14v4m0 4h.01"/></svg>
+    <span id="error-text" style="font-size:0.82rem; color:#f85149;"></span>
+  </div>
+
+  <!-- ══════════════════ DASHBOARD ══════════════════ -->
+  <div id="dashboard" style="display:none; margin-top:0;">
+
+    <!-- ── Metric Cards ── -->
+    <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;">
+      <div class="metric-card">
+        <p style="font-size:0.7rem; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#484f58; margin:0 0 10px;">Total Packets</p>
+        <p id="m-total" style="font-size:2rem; font-weight:700; color:#e6edf3; margin:0; line-height:1;">0</p>
+      </div>
+      <div class="metric-card">
+        <p style="font-size:0.7rem; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#484f58; margin:0 0 10px;">With Payload</p>
+        <p id="m-payload" style="font-size:2rem; font-weight:700; color:#58a6ff; margin:0; line-height:1;">0</p>
+      </div>
+      <div class="metric-card">
+        <p style="font-size:0.7rem; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#484f58; margin:0 0 10px;">IOCs Found</p>
+        <p id="m-iocs" style="font-size:2rem; font-weight:700; color:#e3b341; margin:0; line-height:1;">0</p>
+      </div>
+      <div class="metric-card">
+        <p style="font-size:0.7rem; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#484f58; margin:0 0 10px;">Critical / High</p>
+        <p id="m-critical" style="font-size:2rem; font-weight:700; color:#f85149; margin:0; line-height:1;">0</p>
+      </div>
+    </div>
+
+    <!-- ── Charts Row ── -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px;">
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">Protocol Distribution</span>
+        </div>
+        <div style="padding:20px; height:240px; display:flex; align-items:center; justify-content:center;">
+          <canvas id="chart-proto"></canvas>
+        </div>
+      </div>
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">Risk Severity Breakdown</span>
+        </div>
+        <div style="padding:20px; height:240px;">
+          <canvas id="chart-severity"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Flagged Packets ── -->
+    <div class="section-card" style="margin-bottom:24px;">
+      <div class="section-header">
+        <span class="section-title">Flagged Suspicious Packets</span>
+        <span id="flagged-count" style="font-size:0.72rem; color:#484f58;"></span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #21262d;">
+              <th style="padding:10px 20px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58; white-space:nowrap;">#</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Protocol</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Flow</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Score</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Severity</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Finding</th>
+            </tr>
+          </thead>
+          <tbody id="flagged-tbody"></tbody>
+        </table>
+        <p id="flagged-empty" style="display:none; text-align:center; padding:32px; font-size:0.82rem; color:#484f58;">No suspicious packets detected.</p>
+      </div>
+    </div>
+
+    <!-- ── IOC Table ── -->
+    <div class="section-card">
+      <div class="section-header">
+        <span class="section-title">Harvested Indicators of Compromise</span>
+        <span id="ioc-count" style="font-size:0.72rem; color:#484f58;"></span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #21262d;">
+              <th style="padding:10px 20px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58; width:110px;">Type</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Value</th>
+              <th style="padding:10px 16px; text-align:left; font-size:0.68rem; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:#484f58;">Context</th>
+            </tr>
+          </thead>
+          <tbody id="ioc-tbody"></tbody>
+        </table>
+        <p id="ioc-empty" style="display:none; text-align:center; padding:32px; font-size:0.82rem; color:#484f58;">No IOCs harvested.</p>
+      </div>
+    </div>
+
+  </div><!-- /dashboard -->
+</main>
+
+<!-- ══════════════════════════════ MODAL ══════════════════════════════ -->
+<div id="modal-overlay"
+  style="display:none; position:fixed; inset:0; background:rgba(1,4,9,0.8); backdrop-filter:blur(4px); z-index:200; padding:24px; overflow-y:auto;"
+  onclick="onOverlayClick(event)">
+
+  <div id="modal-box"
+    style="background:#161b22; border:1px solid #30363d; border-radius:12px; width:100%; max-width:780px; margin:0 auto; box-shadow:0 24px 48px rgba(0,0,0,0.6);"
+    onclick="event.stopPropagation()">
+
+    <!-- Modal header -->
+    <div style="padding:18px 24px; border-bottom:1px solid #21262d; display:flex; align-items:center; justify-content:space-between;">
+      <h2 id="modal-title" style="font-size:0.9rem; font-weight:600; color:#e6edf3; margin:0;">Packet Inspector</h2>
+      <button onclick="closeModal()" style="background:transparent; border:none; color:#8b949e; cursor:pointer; font-size:1.2rem; line-height:1; padding:2px 6px; border-radius:4px;"
+        onmouseover="this.style.color='#e6edf3'" onmouseout="this.style.color='#8b949e'">&times;</button>
+    </div>
+
+    <!-- Loading -->
+    <div id="modal-loading" style="display:flex; flex-direction:column; align-items:center; gap:12px; padding:60px;">
+      <div class="spinner"></div>
+      <p style="font-size:0.8rem; color:#484f58; margin:0;">Fetching packet data…</p>
+    </div>
+
+    <!-- Content -->
+    <div id="modal-content" style="display:none; padding:24px;">
+
+      <!-- Meta row -->
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px;">
+        <div style="background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:12px;">
+          <p style="font-size:0.68rem; color:#484f58; margin:0 0 5px; text-transform:uppercase; letter-spacing:0.06em;">Flow</p>
+          <p id="mi-flow" class="mono" style="font-size:0.75rem; color:#79c0ff; margin:0; word-break:break-all;"></p>
+        </div>
+        <div style="background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:12px;">
+          <p style="font-size:0.68rem; color:#484f58; margin:0 0 5px; text-transform:uppercase; letter-spacing:0.06em;">Protocol</p>
+          <p id="mi-proto" style="font-size:0.85rem; font-weight:600; color:#e6edf3; margin:0;"></p>
+        </div>
+        <div style="background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:12px;">
+          <p style="font-size:0.68rem; color:#484f58; margin:0 0 5px; text-transform:uppercase; letter-spacing:0.06em;">Wire / Payload</p>
+          <p id="mi-size" style="font-size:0.85rem; font-weight:600; color:#e6edf3; margin:0;"></p>
+        </div>
+      </div>
+
+      <!-- Risk panel -->
+      <div id="mi-risk-panel" style="border-radius:8px; padding:16px; margin-bottom:20px; border:1px solid #21262d;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+          <span style="font-size:0.78rem; font-weight:600; color:#c9d1d9;">Threat Assessment</span>
+          <span id="mi-sev-badge" style="font-size:0.68rem; font-weight:700; padding:3px 10px; border-radius:99px;"></span>
+        </div>
+        <p style="font-size:0.75rem; color:#8b949e; margin:0 0 8px;">
+          Score: <span id="mi-score" style="color:#e6edf3; font-weight:600;"></span> / 100
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          Entropy: <span id="mi-entropy" class="mono" style="color:#e6edf3;"></span> bits/byte
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          IOCs: <span id="mi-ioc-n" style="color:#e6edf3; font-weight:600;"></span>
+        </p>
+        <div id="mi-findings" style="font-size:0.75rem; color:#8b949e; line-height:1.7;"></div>
+      </div>
+
+      <!-- Hex dump -->
+      <div style="margin-bottom:20px;">
+        <p style="font-size:0.68rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#484f58; margin:0 0 8px;">Hex Dump</p>
+        <div style="background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:14px; overflow-x:auto;">
+          <pre id="mi-hexdump" class="mono" style="font-size:0.72rem; color:#8b949e; margin:0; white-space:pre; line-height:1.7;"></pre>
+          <p id="mi-no-payload" style="display:none; font-size:0.8rem; color:#484f58; text-align:center; padding:16px 0; margin:0;">No application payload in this packet.</p>
+        </div>
+      </div>
+
+      <!-- Decoded artifacts -->
+      <div style="margin-bottom:20px;">
+        <p style="font-size:0.68rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#484f58; margin:0 0 8px;">Decoded Encodings</p>
+        <table style="width:100%; border-collapse:collapse; font-size:0.75rem;">
+          <thead>
+            <tr style="border-bottom:1px solid #21262d;">
+              <th style="padding:7px 0; text-align:left; color:#484f58; font-weight:600; width:90px;">Encoding</th>
+              <th style="padding:7px 10px; text-align:left; color:#484f58; font-weight:600; width:180px;">Original</th>
+              <th style="padding:7px 0;  text-align:left; color:#484f58; font-weight:600;">Decoded</th>
+            </tr>
+          </thead>
+          <tbody id="mi-artifacts-tbody"></tbody>
+        </table>
+        <p id="mi-no-artifacts" style="display:none; font-size:0.78rem; color:#484f58; padding:12px 0; margin:0;">No encoded payloads detected.</p>
+      </div>
+
+      <!-- IOCs list -->
+      <div id="mi-iocs-section" style="display:none;">
+        <p style="font-size:0.68rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#484f58; margin:0 0 8px;">Extracted IOCs</p>
+        <div id="mi-iocs-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </div>
+
+    </div><!-- /modal-content -->
+  </div>
+</div>
+
+<!-- ══════════════════════════════ SCRIPT ══════════════════════════════ -->
+<script>
+'use strict';
+
+// ── Chart instances ────────────────────────────────────────────────────────
+let _protoChart = null;
+let _sevChart   = null;
+
+// IOC type colour map
+const IOC_COLORS = {
+  IPv4:'#79c0ff', IPv6:'#79c0ff', URL:'#d2a8ff',
+  Domain:'#58a6ff', Email:'#e3b341',
+  MD5:'#ffa657', SHA1:'#ffa657', SHA256:'#ffa657', CVE:'#f85149',
+};
+
+// Severity colours for risk panel backgrounds
+const SEV_BG = {
+  CLEAN:   'rgba(35,134,54,.12)',  CLEAN_BD:   'rgba(35,134,54,.3)',
+  LOW:     'rgba(88,166,255,.1)',  LOW_BD:     'rgba(88,166,255,.25)',
+  MEDIUM:  'rgba(187,128,9,.12)', MEDIUM_BD:  'rgba(187,128,9,.3)',
+  HIGH:    'rgba(218,54,51,.15)', HIGH_BD:    'rgba(218,54,51,.4)',
+  CRITICAL:'rgba(218,54,51,.25)', CRITICAL_BD:'rgba(218,54,51,.6)',
+};
+
+// ── Drag & drop ────────────────────────────────────────────────────────────
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('drop-active');
+}
+function onDragLeave() {
+  document.getElementById('drop-zone').classList.remove('drop-active');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drop-active');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+}
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) uploadFile(file);
+}
+
+// ── Upload ─────────────────────────────────────────────────────────────────
+async function uploadFile(file) {
+  setLoading(true, 'Uploading and parsing ' + file.name + '…');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    renderDashboard(data, file.name);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function loadSample(e) {
+  e.stopPropagation();
+  setLoading(true, 'Loading attack traffic demo…');
+  try {
+    const res  = await fetch('/api/load-sample', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to load sample');
+    renderDashboard(data, data?.metadata?.source_file || 'sample.pcap');
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Dashboard render ───────────────────────────────────────────────────────
+function renderDashboard(data, filename) {
+  hideError();
+
+  const pill = document.getElementById('status-pill');
+  pill.innerHTML = `<span style="width:6px;height:6px;border-radius:50%;background:#3fb950;flex-shrink:0;"></span><span>${esc(filename)}</span>`;
+
+  const exec  = data.executive_summary || {};
+  const sev   = exec.severity_breakdown || {};
+  const iocs  = data.harvested_iocs || [];
+
+  setText('m-total',    (exec.total_packets       || 0).toLocaleString());
+  setText('m-payload',  (exec.packets_with_payload || exec.total_suspicious_packets || 0).toLocaleString());
+  setText('m-iocs',     iocs.length.toLocaleString());
+  setText('m-critical', ((sev.CRITICAL || 0) + (sev.HIGH || 0)).toLocaleString());
+
+  renderProtoChart(data.statistics?.proto_distribution || {});
+  renderSevChart(sev);
+  renderFlaggedTable(data.suspicious_packets || []);
+  renderIOCTable(iocs);
+
+  document.getElementById('upload-section').style.display = 'none';
+  document.getElementById('dashboard').style.display      = 'block';
+}
+
+// ── Charts ─────────────────────────────────────────────────────────────────
+const CHART_PALETTE = ['#58a6ff','#3fb950','#e3b341','#f85149','#d2a8ff','#ffa657','#79c0ff','#7ee787'];
+
+function renderProtoChart(dist) {
+  if (_protoChart) _protoChart.destroy();
+  const labels = Object.keys(dist);
+  const values = Object.values(dist);
+  _protoChart = new Chart(
+    document.getElementById('chart-proto').getContext('2d'),
+    {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: CHART_PALETTE.slice(0, labels.length),
+          borderWidth: 0,
+          hoverOffset: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '65%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#8b949e', boxWidth: 10, padding: 14, font: { size: 11 } },
+          },
+        },
+      },
+    }
+  );
+}
+
+function renderSevChart(sev) {
+  if (_sevChart) _sevChart.destroy();
+  const labels = ['CLEAN','LOW','MEDIUM','HIGH','CRITICAL'];
+  const colors  = ['#3fb950','#58a6ff','#e3b341','#f85149','#da3633'];
+  _sevChart = new Chart(
+    document.getElementById('chart-severity').getContext('2d'),
+    {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data: labels.map(k => sev[k] || 0),
+          backgroundColor: colors,
+          borderRadius: 5,
+          borderSkipped: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#484f58', font:{size:11} }, grid: { display: false }, border:{color:'#21262d'} },
+          y: { ticks: { color: '#484f58', precision: 0, font:{size:11} }, grid: { color: '#21262d' }, border:{color:'#21262d'} },
+        },
+      },
+    }
+  );
+}
+
+// ── Flagged packets table ──────────────────────────────────────────────────
+function renderFlaggedTable(packets) {
+  const tbody = document.getElementById('flagged-tbody');
+  const empty = document.getElementById('flagged-empty');
+  const count = document.getElementById('flagged-count');
+  tbody.innerHTML = '';
+
+  if (!packets.length) {
+    empty.style.display = 'block';
+    count.textContent   = '';
+    return;
+  }
+  empty.style.display = 'none';
+  count.textContent   = packets.length + ' packets';
+
+  packets.forEach(p => {
+    const sev     = p.severity || 'CLEAN';
+    const src     = p.src || 'N/A';
+    const dst     = p.dst || 'N/A';
+    const finding = p.findings?.[0] ? esc(p.findings[0]) : '<span style="color:#484f58;">—</span>';
+    const tr      = document.createElement('tr');
+    tr.className  = 'tbl-row';
+    tr.style.borderBottom = '1px solid #21262d';
+    tr.innerHTML  = `
+      <td style="padding:11px 20px;" class="mono" style="font-size:0.78rem; color:#8b949e;">#${p.packet_number}</td>
+      <td style="padding:11px 16px; font-size:0.8rem; color:#c9d1d9;">${esc(p.protocol || '')}</td>
+      <td style="padding:11px 16px; font-size:0.75rem;" class="mono"><span style="color:#8b949e;">${esc(src)}</span><br><span style="color:#484f58; font-size:0.68rem;">&#8594; ${esc(dst)}</span></td>
+      <td style="padding:11px 16px; font-size:0.88rem; font-weight:700; color:#e6edf3;">${p.risk_score}</td>
+      <td style="padding:11px 16px;"><span class="sev-${sev}" style="font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:99px;">${sev}</span></td>
+      <td style="padding:11px 16px; font-size:0.78rem; color:#8b949e; max-width:280px;">${finding}</td>
+    `;
+    tr.addEventListener('click', () => openInspector(p.packet_number));
+    tbody.appendChild(tr);
+  });
+}
+
+// ── IOC table ──────────────────────────────────────────────────────────────
+function renderIOCTable(iocs) {
+  const tbody = document.getElementById('ioc-tbody');
+  const empty = document.getElementById('ioc-empty');
+  const count = document.getElementById('ioc-count');
+  tbody.innerHTML = '';
+
+  if (!iocs.length) {
+    empty.style.display = 'block';
+    count.textContent   = '';
+    return;
+  }
+  empty.style.display = 'none';
+  count.textContent   = iocs.length + ' indicators';
+
+  iocs.forEach(ioc => {
+    const typeKey = ioc.ioc_type || ioc.type;
+    const val     = ioc.value;
+    const col     = IOC_COLORS[typeKey] || '#8b949e';
+    const tr      = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #21262d';
+    tr.innerHTML  = `
+      <td style="padding:10px 20px; font-size:0.75rem; font-weight:600; color:${col}; white-space:nowrap;">${esc(typeKey)}</td>
+      <td style="padding:10px 16px; font-size:0.75rem; color:#c9d1d9; word-break:break-all;" class="mono">${esc(val)}</td>
+      <td style="padding:10px 16px; font-size:0.75rem; color:#484f58;">${esc(ioc.context || '')}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Packet inspector modal ─────────────────────────────────────────────────
+async function openInspector(n) {
+  const overlay = document.getElementById('modal-overlay');
+  document.getElementById('modal-title').textContent   = `Packet #${n} Inspector`;
+  document.getElementById('modal-loading').style.display = 'flex';
+  document.getElementById('modal-content').style.display = 'none';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'flex-start';
+  overlay.style.justifyContent = 'center';
+
+  try {
+    const res = await fetch(`/api/packets/${n}`);
+    if (!res.ok) throw new Error('Not found');
+    populateModal(await res.json());
+    document.getElementById('modal-loading').style.display = 'none';
+    document.getElementById('modal-content').style.display = 'block';
+  } catch (err) {
+    document.getElementById('modal-loading').style.display = 'none';
+    document.getElementById('modal-content').style.display = 'block';
+    document.getElementById('modal-content').innerHTML =
+      `<p style="color:#f85149;font-size:0.82rem;padding:16px 0;">Error: ${esc(err.message)}</p>`;
+  }
+}
+
+function populateModal(d) {
+  setText('mi-flow',    (d.src || 'N/A') + '  →  ' + (d.dst || 'N/A'));
+  setText('mi-proto',   [d.protocol, d.app_proto].filter(Boolean).join(' / '));
+  setText('mi-size',    `${d.wire_length || 0} B  /  ${d.payload_length || 0} B payload`);
+
+  // Risk panel
+  const ta  = d.threat_assessment || {};
+  const sev = ta.severity || 'CLEAN';
+  const bg  = SEV_BG[sev]    || 'rgba(255,255,255,0.05)';
+  const bd  = SEV_BG[sev+'_BD'] || '#30363d';
+  const panel = document.getElementById('mi-risk-panel');
+  panel.style.background = bg;
+  panel.style.borderColor = bd;
+
+  setText('mi-score',   ta.score ?? 0);
+  setText('mi-entropy', (ta.entropy || 0).toFixed(4));
+  setText('mi-ioc-n',   (ta.iocs || []).length);
+
+  const badge = document.getElementById('mi-sev-badge');
+  badge.textContent   = sev;
+  badge.className     = `sev-${sev}`;
+  badge.style.cssText += 'font-size:0.68rem; font-weight:700; padding:3px 10px; border-radius:99px;';
+
+  const findingsEl = document.getElementById('mi-findings');
+  findingsEl.innerHTML = (ta.findings || [])
+    .map(f => `<span style="display:block;">&#8227; ${esc(f)}</span>`)
+    .join('');
+
+  // Hex dump
+  const norm = d.byte_normalization || {};
+  const hexEl = document.getElementById('mi-hexdump');
+  const noPayEl = document.getElementById('mi-no-payload');
+  if (norm.hex_dump) {
+    hexEl.textContent     = norm.hex_dump;
+    hexEl.style.display   = 'block';
+    noPayEl.style.display = 'none';
+  } else {
+    hexEl.style.display   = 'none';
+    noPayEl.style.display = 'block';
+  }
+
+  // Decoded artifacts
+  const arts     = d.decoded_artifacts || [];
+  const artsTbody = document.getElementById('mi-artifacts-tbody');
+  const noArts   = document.getElementById('mi-no-artifacts');
+  artsTbody.innerHTML = '';
+  if (arts.length) {
+    noArts.style.display = 'none';
+    arts.forEach(a => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #21262d';
+      tr.innerHTML = `
+        <td style="padding:8px 0; color:#e3b341; font-weight:600;">${esc(a.encoding)}</td>
+        <td class="mono" style="padding:8px 10px; color:#484f58; font-size:0.72rem; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((a.original||'').slice(0,60))}</td>
+        <td class="mono" style="padding:8px 0; color:#c9d1d9; font-size:0.72rem; word-break:break-all;">${esc((a.decoded_text||'').slice(0,140))}</td>
+      `;
+      artsTbody.appendChild(tr);
+    });
+  } else {
+    noArts.style.display = 'block';
+  }
+
+  // IOC chips
+  const pktIocs   = ta.iocs || [];
+  const iocsSection = document.getElementById('mi-iocs-section');
+  const iocsList    = document.getElementById('mi-iocs-list');
+  iocsList.innerHTML = '';
+  if (pktIocs.length) {
+    iocsSection.style.display = 'block';
+    pktIocs.forEach(ioc => {
+      const col  = IOC_COLORS[ioc.ioc_type] || '#8b949e';
+      const chip = document.createElement('span');
+      chip.className = 'mono';
+      chip.style.cssText = `font-size:0.72rem; padding:3px 10px; border-radius:99px; background:#0d1117; border:1px solid #30363d; color:${col}; white-space:nowrap;`;
+      chip.textContent = `[${ioc.ioc_type}] ${ioc.value}`;
+      iocsList.appendChild(chip);
+    });
+  } else {
+    iocsSection.style.display = 'none';
+  }
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+}
+function onOverlayClick(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+function toggleExportMenu() {
+  const menu = document.getElementById('export-menu');
+  const open = menu.style.display === 'none' || !menu.style.display;
+  menu.style.display = open ? 'block' : 'none';
+  if (open) setTimeout(() => document.addEventListener('click', hideMenuOnce, { once: true }), 50);
+}
+function hideMenuOnce() {
+  document.getElementById('export-menu').style.display = 'none';
+}
+function exportReport(type) {
+  document.getElementById('export-menu').style.display = 'none';
+  window.location.href = '/api/export/' + type;
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────
+function setLoading(on, text) {
+  const sec   = document.getElementById('upload-section');
+  const zone  = document.getElementById('drop-zone');
+  const prog  = document.getElementById('upload-loading');
+
+  if (on) {
+    zone.style.display  = 'none';
+    prog.style.display  = 'flex';
+    if (text) setText('loading-text', text);
+  } else {
+    zone.style.display  = 'block';
+    prog.style.display  = 'none';
+  }
+}
+function showError(msg) {
+  const b = document.getElementById('error-banner');
+  document.getElementById('error-text').textContent = msg;
+  b.style.display = 'flex';
+}
+function hideError() {
+  document.getElementById('error-banner').style.display = 'none';
+}
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+function esc(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+</script>
+</body>
+</html>
