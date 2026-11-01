@@ -61,6 +61,11 @@ class PacketRecord:
     payload_preview: bytes = field(default_factory=bytes, repr=False)  # first 64 B
     payload: bytes = field(default_factory=bytes, repr=False)          # full application payload
 
+    # ── Feature Engineering: Payload Characteristics ─────────────────────
+    payload_size: int = 0           # payload size in bytes
+    payload_entropy: float = 0.0    # Shannon entropy [0.0 - 8.0]
+    printable_ascii_ratio: float = 0.0  # Printable ASCII ratio [0.0 - 1.0]
+
     # ── Parse provenance ─────────────────────────────────────────────────
     parse_backend: str = ""         # "dpkt" | "tshark"
     parse_errors: list[str] = field(default_factory=list)

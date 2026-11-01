@@ -156,9 +156,20 @@ def parse(
         _print_summary(stats)
 
     if output:
-        import pandas as pd
-        df = pd.DataFrame([r.to_dict() for r in records])
-        df.to_csv(output, index=False)
+        out_p = Path(output)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        dict_rows = [r.to_dict() for r in records]
+        try:
+            import pandas as pd
+            df = pd.DataFrame(dict_rows)
+            df.to_csv(out_p, index=False)
+        except ImportError:
+            import csv
+            if dict_rows:
+                with open(out_p, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(dict_rows[0].keys()))
+                    writer.writeheader()
+                    writer.writerows(dict_rows)
         console.print(f"[green][OK][/green] Saved CSV -> [cyan]{output}[/cyan]")
 
 
@@ -201,10 +212,12 @@ def inspect(pcap_file: str, packet_num: int) -> None:
     hdr_info = (
         f"[bold]Packet #[/bold]{target_rec.packet_number}  |  "
         f"[bold]Proto:[/bold] {target_rec.transport_proto or target_rec.network_proto} ({target_rec.app_proto or 'Unknown App'})  |  "
-        f"[bold]Size:[/bold] {target_rec.wire_length} B\n"
+        f"[bold]Wire Size:[/bold] {target_rec.wire_length} B\n"
         f"[bold]Flow:[/bold] {src} -> {dst}\n"
         f"[bold]Flags:[/bold] {target_rec.tcp_flags or 'N/A'}  |  "
-        f"[bold]Payload Length:[/bold] {target_rec.payload_length} bytes"
+        f"[bold]Payload Size:[/bold] {target_rec.payload_size} bytes  |  "
+        f"[bold]Entropy:[/bold] {target_rec.payload_entropy:.4f}  |  "
+        f"[bold]Printable ASCII:[/bold] {target_rec.printable_ascii_ratio:.2%}"
     )
     console.print(Panel(hdr_info, title=f"Packet #{target_rec.packet_number} Metadata", border_style="cyan"))
 
@@ -480,3 +493,8 @@ def _print_summary(stats: dict) -> None:
         for ip, count in list(top_src.items())[:10]:
             t3.add_row(ip, str(count))
         console.print(t3)
+
+
+if __name__ == "__main__":
+    main()
+

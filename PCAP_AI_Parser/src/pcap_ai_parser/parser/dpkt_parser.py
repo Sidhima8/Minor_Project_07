@@ -25,17 +25,24 @@ from __future__ import annotations
 import socket
 import struct
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, Optional, List, Dict, Any, Tuple
 
 import dpkt
 from loguru import logger
 
+from pcap_ai_parser.features import (
+    calculate_payload_size,
+    calculate_printable_ascii_ratio,
+    calculate_shannon_entropy,
+)
 from pcap_ai_parser.models.packet import (
     PacketRecord,
     decode_tcp_flags,
     ethertype_to_name,
 )
+from pcap_ai_parser.parser.payload_extractor import PayloadExtractor, ExtractedPayloadInfo
 
 # ── Well-known port → application protocol mapping ───────────────────────────
 
@@ -294,6 +301,16 @@ class DpktParser:
             rec.icmp_type = data.type
             rec.icmp_code = data.code
 
+        # ── Feature Engineering: Payload Characteristics Extraction ──
+        if rec.payload:
+            rec.payload_size = calculate_payload_size(rec.payload)
+            rec.payload_entropy = calculate_shannon_entropy(rec.payload)
+            rec.printable_ascii_ratio = calculate_printable_ascii_ratio(rec.payload)
+        else:
+            rec.payload_size = 0
+            rec.payload_entropy = 0.0
+            rec.printable_ascii_ratio = 0.0
+
     # ── Summary stats ─────────────────────────────────────────────────────
 
     def summary(self) -> dict:
@@ -313,3 +330,190 @@ class DpktParser:
             "top_dst_ips": dict(self._ip_dst_counter.most_common(10)),
             "parse_errors": len(self._errors),
         }
+
+
+# ── Packet & Parser abstractions for Payload Normalization & Triage ──────────
+
+@dataclass
+class ParsedPacket:
+    """Dataclass holding extracted network metadata and normalized payload details for a single packet."""
+    packet_index: int
+    timestamp: float
+    orig_len: int
+    src_ip: str
+    dst_ip: str
+    ip_version: int
+    protocol: str
+    src_port: Optional[int] = None
+    dst_port: Optional[int] = None
+    payload_info: Optional[ExtractedPayloadInfo] = None
+
+    @property
+    def payload_size(self) -> int:
+        """Convenience property for payload size in bytes."""
+        return self.payload_info.payload_len if self.payload_info else 0
+
+    @property
+    def payload_entropy(self) -> float:
+        """Convenience property for payload Shannon entropy."""
+        if self.payload_info and self.payload_info.normalization:
+            return self.payload_info.normalization.metrics.get("shannon_entropy", 0.0)
+        return 0.0
+
+    @property
+    def printable_ascii_ratio(self) -> float:
+        """Convenience property for payload printable ASCII ratio."""
+        if self.payload_info and self.payload_info.normalization:
+            return self.payload_info.normalization.metrics.get("printable_ascii_ratio", 0.0)
+        return 0.0
+
+    def get_5tuple(self) -> Tuple[str, int, str, int, str]:
+        """Returns standard 5-tuple identifier (src_ip, src_port, dst_ip, dst_port, protocol)."""
+        return (
+            self.src_ip,
+            self.src_port or 0,
+            self.dst_ip,
+            self.dst_port or 0,
+            self.protocol,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts parsed packet into serializable dictionary format."""
+        return {
+            "packet_index": self.packet_index,
+            "timestamp": self.timestamp,
+            "orig_len": self.orig_len,
+            "src_ip": self.src_ip,
+            "dst_ip": self.dst_ip,
+            "ip_version": self.ip_version,
+            "protocol": self.protocol,
+            "src_port": self.src_port,
+            "dst_port": self.dst_port,
+            "payload_size": self.payload_size,
+            "payload_entropy": self.payload_entropy,
+            "printable_ascii_ratio": self.printable_ascii_ratio,
+            "payload_info": self.payload_info.to_dict() if self.payload_info else None,
+        }
+
+
+class DpktPCAPParser:
+    """
+    PCAP file parser leveraging dpkt for high-throughput packet decoding,
+    metadata extraction, and application payload normalization.
+    """
+
+    def __init__(self, hex_escape_non_printable: bool = True):
+        self.payload_extractor = PayloadExtractor(hex_escape_non_printable=hex_escape_non_printable)
+
+    def parse_file(self, pcap_path: str) -> List[ParsedPacket]:
+        """
+        Reads a PCAP / PCAPNG file and parses all packet records into ParsedPacket objects.
+        """
+        packets: List[ParsedPacket] = []
+        packet_idx = 0
+
+        with open(pcap_path, "rb") as f:
+            try:
+                pcap_reader = dpkt.pcap.Reader(f)
+            except Exception:
+                f.seek(0)
+                pcap_reader = dpkt.pcapng.Reader(f)
+
+            for ts, buf in pcap_reader:
+                packet_idx += 1
+                try:
+                    parsed = self._parse_single_packet(packet_idx, ts, buf)
+                    if parsed:
+                        packets.append(parsed)
+                except Exception:
+                    continue
+
+        return packets
+
+    def _parse_single_packet(self, packet_idx: int, ts: float, buf: bytes) -> Optional[ParsedPacket]:
+        """Parses raw packet buffer into a ParsedPacket object."""
+        try:
+            eth = dpkt.ethernet.Ethernet(buf)
+        except Exception:
+            try:
+                ip = dpkt.ip.IP(buf)
+                return self._parse_ip_layer(packet_idx, ts, len(buf), ip)
+            except Exception:
+                return None
+
+        if isinstance(eth.data, dpkt.ip.IP):
+            return self._parse_ip_layer(packet_idx, ts, len(buf), eth.data)
+        elif isinstance(eth.data, dpkt.ip6.IP6):
+            return self._parse_ip6_layer(packet_idx, ts, len(buf), eth.data)
+        
+        return None
+
+    def _parse_ip_layer(self, packet_idx: int, ts: float, orig_len: int, ip: dpkt.ip.IP) -> ParsedPacket:
+        """Decodes IPv4 header and inner transport protocol payload."""
+        src_ip = socket.inet_ntoa(ip.src)
+        dst_ip = socket.inet_ntoa(ip.dst)
+
+        protocol_name, src_port, dst_port, raw_payload = self._extract_transport(ip)
+
+        payload_info = self.payload_extractor.extract_payload(
+            transport_proto=protocol_name,
+            payload_bytes=raw_payload,
+            src_port=src_port,
+            dst_port=dst_port,
+        )
+
+        return ParsedPacket(
+            packet_index=packet_idx,
+            timestamp=ts,
+            orig_len=orig_len,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            ip_version=4,
+            protocol=protocol_name,
+            src_port=src_port,
+            dst_port=dst_port,
+            payload_info=payload_info,
+        )
+
+    def _parse_ip6_layer(self, packet_idx: int, ts: float, orig_len: int, ip6: dpkt.ip6.IP6) -> ParsedPacket:
+        """Decodes IPv6 header and inner transport protocol payload."""
+        src_ip = socket.inet_ntop(socket.AF_INET6, ip6.src)
+        dst_ip = socket.inet_ntop(socket.AF_INET6, ip6.dst)
+
+        protocol_name, src_port, dst_port, raw_payload = self._extract_transport(ip6)
+
+        payload_info = self.payload_extractor.extract_payload(
+            transport_proto=protocol_name,
+            payload_bytes=raw_payload,
+            src_port=src_port,
+            dst_port=dst_port,
+        )
+
+        return ParsedPacket(
+            packet_index=packet_idx,
+            timestamp=ts,
+            orig_len=orig_len,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            ip_version=6,
+            protocol=protocol_name,
+            src_port=src_port,
+            dst_port=dst_port,
+            payload_info=payload_info,
+        )
+
+    def _extract_transport(self, ip_obj: Any) -> Tuple[str, Optional[int], Optional[int], bytes]:
+        """Extracts transport protocol name, ports, and payload bytes from IP packet object."""
+        data = ip_obj.data
+
+        if isinstance(data, dpkt.tcp.TCP):
+            return "TCP", data.sport, data.dport, bytes(data.data)
+        elif isinstance(data, dpkt.udp.UDP):
+            return "UDP", data.sport, data.dport, bytes(data.data)
+        elif isinstance(data, dpkt.icmp.ICMP):
+            return "ICMP", None, None, bytes(data.data)
+        elif isinstance(data, bytes):
+            return "RAW", None, None, data
+        else:
+            return "OTHER", None, None, bytes(getattr(data, "data", b""))
+
