@@ -10,20 +10,37 @@ __version__ = "0.1.0"
 __author__ = "rohinish"
 
 from pcap_ai_parser.features import (
+    EncodingFeatures,
+    IOCFeatures,
     PayloadCharacteristics,
+    ProtocolContextFeatures,
+    UnifiedPacketFeatures,
     calculate_payload_size,
-    calculate_shannon_entropy,
     calculate_printable_ascii_ratio,
+    calculate_shannon_entropy,
+    extract_encoding_features,
+    extract_features_dict,
+    extract_ioc_features,
     extract_payload_characteristics,
+    extract_protocol_context,
+    extract_unified_packet_features,
 )
 
 __all__ = [
     "__version__",
     "__author__",
     "PayloadCharacteristics",
+    "ProtocolContextFeatures",
+    "IOCFeatures",
+    "EncodingFeatures",
+    "UnifiedPacketFeatures",
     "calculate_payload_size",
     "calculate_shannon_entropy",
     "calculate_printable_ascii_ratio",
     "extract_payload_characteristics",
+    "extract_protocol_context",
+    "extract_ioc_features",
+    "extract_encoding_features",
+    "extract_unified_packet_features",
+    "extract_features_dict",
 ]
-

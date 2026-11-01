@@ -212,12 +212,18 @@ def inspect(pcap_file: str, packet_num: int) -> None:
     hdr_info = (
         f"[bold]Packet #[/bold]{target_rec.packet_number}  |  "
         f"[bold]Proto:[/bold] {target_rec.transport_proto or target_rec.network_proto} ({target_rec.app_proto or 'Unknown App'})  |  "
+        f"[bold]Category:[/bold] {target_rec.protocol_category}  |  "
         f"[bold]Wire Size:[/bold] {target_rec.wire_length} B\n"
-        f"[bold]Flow:[/bold] {src} -> {dst}\n"
+        f"[bold]Flow:[/bold] {src} -> {dst} "
+        f"({'Client->Server' if target_rec.is_client_to_server else 'Server->Client / Peer'})\n"
         f"[bold]Flags:[/bold] {target_rec.tcp_flags or 'N/A'}  |  "
         f"[bold]Payload Size:[/bold] {target_rec.payload_size} bytes  |  "
         f"[bold]Entropy:[/bold] {target_rec.payload_entropy:.4f}  |  "
-        f"[bold]Printable ASCII:[/bold] {target_rec.printable_ascii_ratio:.2%}"
+        f"[bold]Printable ASCII:[/bold] {target_rec.printable_ascii_ratio:.2%}\n"
+        f"[bold]IOC Count:[/bold] {target_rec.total_ioc_count}  |  "
+        f"[bold]Encodings:[/bold] Base64={'YES' if target_rec.has_base64 else 'NO'}, "
+        f"URL={'YES' if target_rec.has_url_encoding else 'NO'}, "
+        f"Hex={'YES' if target_rec.has_hex_encoding else 'NO'}"
     )
     console.print(Panel(hdr_info, title=f"Packet #{target_rec.packet_number} Metadata", border_style="cyan"))
 

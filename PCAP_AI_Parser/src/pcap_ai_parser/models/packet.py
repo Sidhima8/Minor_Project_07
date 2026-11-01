@@ -66,6 +66,17 @@ class PacketRecord:
     payload_entropy: float = 0.0    # Shannon entropy [0.0 - 8.0]
     printable_ascii_ratio: float = 0.0  # Printable ASCII ratio [0.0 - 1.0]
 
+    # ── Feature Engineering: Context, IOCs & Encoding Indicators ─────────
+    protocol_category: str = "OTHER"     # e.g. "WEB", "DNS", "REMOTE_ACCESS", "DATABASE"
+    is_well_known_port: bool = False     # True if src_port or dst_port < 1024
+    is_client_to_server: bool = False    # Flow direction heuristic
+    total_ioc_count: int = 0             # Total discovered IOCs in packet
+    has_iocs: bool = False               # True if total_ioc_count > 0
+    has_encoding: bool = False           # True if any encoding detected
+    has_base64: bool = False             # True if base64 detected
+    has_url_encoding: bool = False       # True if URL encoding detected
+    has_hex_encoding: bool = False       # True if hex encoding detected
+
     # ── Parse provenance ─────────────────────────────────────────────────
     parse_backend: str = ""         # "dpkt" | "tshark"
     parse_errors: list[str] = field(default_factory=list)

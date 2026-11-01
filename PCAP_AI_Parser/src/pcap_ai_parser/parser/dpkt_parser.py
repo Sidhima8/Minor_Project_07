@@ -36,6 +36,9 @@ from pcap_ai_parser.features import (
     calculate_payload_size,
     calculate_printable_ascii_ratio,
     calculate_shannon_entropy,
+    extract_encoding_features,
+    extract_ioc_features,
+    extract_protocol_context,
 )
 from pcap_ai_parser.models.packet import (
     PacketRecord,
@@ -301,7 +304,8 @@ class DpktParser:
             rec.icmp_type = data.type
             rec.icmp_code = data.code
 
-        # ── Feature Engineering: Payload Characteristics Extraction ──
+        # ── Feature Engineering: Extraction Pipeline ─────────────────────────
+        # 1. Payload Characteristics
         if rec.payload:
             rec.payload_size = calculate_payload_size(rec.payload)
             rec.payload_entropy = calculate_shannon_entropy(rec.payload)
@@ -310,6 +314,36 @@ class DpktParser:
             rec.payload_size = 0
             rec.payload_entropy = 0.0
             rec.printable_ascii_ratio = 0.0
+
+        # 2. Protocol Context
+        p_ctx = extract_protocol_context(
+            transport_proto=rec.transport_proto,
+            src_port=rec.src_port,
+            dst_port=rec.dst_port,
+            app_proto=rec.app_proto,
+        )
+        rec.protocol_category = p_ctx.protocol_category
+        rec.is_well_known_port = p_ctx.is_well_known_port
+        rec.is_client_to_server = p_ctx.is_client_to_server
+
+        # 3. Encoding Indicators & IOC Features
+        if rec.payload:
+            enc = extract_encoding_features(rec.payload)
+            rec.has_encoding = enc.has_encoding
+            rec.has_base64 = enc.has_base64
+            rec.has_url_encoding = enc.has_url_encoding
+            rec.has_hex_encoding = enc.has_hex_encoding
+
+            iocs = extract_ioc_features(rec.payload)
+            rec.total_ioc_count = iocs.total_ioc_count
+            rec.has_iocs = iocs.has_iocs
+        else:
+            rec.has_encoding = False
+            rec.has_base64 = False
+            rec.has_url_encoding = False
+            rec.has_hex_encoding = False
+            rec.total_ioc_count = 0
+            rec.has_iocs = False
 
     # ── Summary stats ─────────────────────────────────────────────────────
 
@@ -367,6 +401,28 @@ class ParsedPacket:
             return self.payload_info.normalization.metrics.get("printable_ascii_ratio", 0.0)
         return 0.0
 
+    @property
+    def protocol_category(self) -> str:
+        ctx = extract_protocol_context(self.protocol, self.src_port, self.dst_port)
+        return ctx.protocol_category
+
+    @property
+    def is_well_known_port(self) -> bool:
+        ctx = extract_protocol_context(self.protocol, self.src_port, self.dst_port)
+        return ctx.is_well_known_port
+
+    @property
+    def total_ioc_count(self) -> int:
+        if self.payload_info and self.payload_info.raw_payload:
+            return extract_ioc_features(self.payload_info.raw_payload).total_ioc_count
+        return 0
+
+    @property
+    def has_encoding(self) -> bool:
+        if self.payload_info and self.payload_info.raw_payload:
+            return extract_encoding_features(self.payload_info.raw_payload).has_encoding
+        return False
+
     def get_5tuple(self) -> Tuple[str, int, str, int, str]:
         """Returns standard 5-tuple identifier (src_ip, src_port, dst_ip, dst_port, protocol)."""
         return (
@@ -387,11 +443,15 @@ class ParsedPacket:
             "dst_ip": self.dst_ip,
             "ip_version": self.ip_version,
             "protocol": self.protocol,
+            "protocol_category": self.protocol_category,
+            "is_well_known_port": self.is_well_known_port,
             "src_port": self.src_port,
             "dst_port": self.dst_port,
             "payload_size": self.payload_size,
             "payload_entropy": self.payload_entropy,
             "printable_ascii_ratio": self.printable_ascii_ratio,
+            "total_ioc_count": self.total_ioc_count,
+            "has_encoding": self.has_encoding,
             "payload_info": self.payload_info.to_dict() if self.payload_info else None,
         }
 
