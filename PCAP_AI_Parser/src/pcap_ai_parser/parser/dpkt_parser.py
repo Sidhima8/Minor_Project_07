@@ -39,6 +39,8 @@ from pcap_ai_parser.features import (
     extract_encoding_features,
     extract_ioc_features,
     extract_protocol_context,
+    extract_tls_features,
+    is_tls_record,
 )
 from pcap_ai_parser.models.packet import (
     PacketRecord,
@@ -305,15 +307,34 @@ class DpktParser:
             rec.icmp_code = data.code
 
         # ── Feature Engineering: Extraction Pipeline ─────────────────────────
-        # 1. Payload Characteristics
-        if rec.payload:
-            rec.payload_size = calculate_payload_size(rec.payload)
-            rec.payload_entropy = calculate_shannon_entropy(rec.payload)
-            rec.printable_ascii_ratio = calculate_printable_ascii_ratio(rec.payload)
-        else:
-            rec.payload_size = 0
+        # 1. Check TLS Record and route to specialized path (bypassing entropy)
+        if rec.payload and is_tls_record(rec.payload):
+            tls_feat = extract_tls_features(rec.payload)
+            rec.is_tls_record = True
+            rec.tls_record_type = tls_feat.record_type
+            rec.tls_version = tls_feat.version
+            rec.tls_sni = tls_feat.sni or ""
+            rec.entropy_excluded = True
+            # Entropy is bypassed/excluded for TLS records
+            rec.payload_size = len(rec.payload)
             rec.payload_entropy = 0.0
-            rec.printable_ascii_ratio = 0.0
+            rec.printable_ascii_ratio = calculate_printable_ascii_ratio(rec.payload)
+            if not rec.app_proto or rec.app_proto == "UNKNOWN":
+                rec.app_proto = "TLS"
+        else:
+            rec.is_tls_record = False
+            rec.tls_record_type = ""
+            rec.tls_version = ""
+            rec.tls_sni = ""
+            rec.entropy_excluded = False
+            if rec.payload:
+                rec.payload_size = calculate_payload_size(rec.payload)
+                rec.payload_entropy = calculate_shannon_entropy(rec.payload)
+                rec.printable_ascii_ratio = calculate_printable_ascii_ratio(rec.payload)
+            else:
+                rec.payload_size = 0
+                rec.payload_entropy = 0.0
+                rec.printable_ascii_ratio = 0.0
 
         # 2. Protocol Context
         p_ctx = extract_protocol_context(
@@ -322,7 +343,10 @@ class DpktParser:
             dst_port=rec.dst_port,
             app_proto=rec.app_proto,
         )
-        rec.protocol_category = p_ctx.protocol_category
+        if rec.is_tls_record and p_ctx.protocol_category == "OTHER":
+            rec.protocol_category = "ENCRYPTED"
+        else:
+            rec.protocol_category = p_ctx.protocol_category
         rec.is_well_known_port = p_ctx.is_well_known_port
         rec.is_client_to_server = p_ctx.is_client_to_server
 
@@ -335,8 +359,12 @@ class DpktParser:
             rec.has_hex_encoding = enc.has_hex_encoding
 
             iocs = extract_ioc_features(rec.payload)
-            rec.total_ioc_count = iocs.total_ioc_count
-            rec.has_iocs = iocs.has_iocs
+            total_iocs = iocs.total_ioc_count
+            # Incorporate SNI domain into IOC count if extracted from TLS Handshake
+            if rec.tls_sni and not any(ioc.value == rec.tls_sni for ioc in iocs.extracted_iocs):
+                total_iocs += 1
+            rec.total_ioc_count = total_iocs
+            rec.has_iocs = total_iocs > 0
         else:
             rec.has_encoding = False
             rec.has_base64 = False
@@ -423,6 +451,40 @@ class ParsedPacket:
             return extract_encoding_features(self.payload_info.raw_payload).has_encoding
         return False
 
+    @property
+    def is_tls_record(self) -> bool:
+        if self.payload_info and self.payload_info.raw_payload:
+            return is_tls_record(self.payload_info.raw_payload)
+        return False
+
+    @property
+    def tls_record_type(self) -> str:
+        if self.payload_info and self.payload_info.is_tls:
+            return self.payload_info.tls_record_type or ""
+        elif self.payload_info and self.payload_info.raw_payload and self.is_tls_record:
+            return extract_tls_features(self.payload_info.raw_payload).record_type
+        return ""
+
+    @property
+    def tls_version(self) -> str:
+        if self.payload_info and self.payload_info.is_tls:
+            return self.payload_info.tls_version or ""
+        elif self.payload_info and self.payload_info.raw_payload and self.is_tls_record:
+            return extract_tls_features(self.payload_info.raw_payload).version
+        return ""
+
+    @property
+    def tls_sni(self) -> str:
+        if self.payload_info and self.payload_info.is_tls:
+            return self.payload_info.tls_sni or ""
+        elif self.payload_info and self.payload_info.raw_payload and self.is_tls_record:
+            return extract_tls_features(self.payload_info.raw_payload).sni or ""
+        return ""
+
+    @property
+    def entropy_excluded(self) -> bool:
+        return self.is_tls_record
+
     def get_5tuple(self) -> Tuple[str, int, str, int, str]:
         """Returns standard 5-tuple identifier (src_ip, src_port, dst_ip, dst_port, protocol)."""
         return (
@@ -452,6 +514,11 @@ class ParsedPacket:
             "printable_ascii_ratio": self.printable_ascii_ratio,
             "total_ioc_count": self.total_ioc_count,
             "has_encoding": self.has_encoding,
+            "is_tls_record": self.is_tls_record,
+            "tls_record_type": self.tls_record_type,
+            "tls_version": self.tls_version,
+            "tls_sni": self.tls_sni,
+            "entropy_excluded": self.entropy_excluded,
             "payload_info": self.payload_info.to_dict() if self.payload_info else None,
         }
 

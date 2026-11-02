@@ -4,6 +4,7 @@ Feature engineering subpackage for PCAP AI Parser.
 Modules:
 - payload_features: Payload characteristics (size, Shannon entropy, printable ASCII ratio).
 - context_ioc_features: Protocol context, IOC counts, encoding indicators, and unified feature vectors.
+- tls_features: Dedicated TLS record detection, TLS metadata extraction path, and entropy bypass.
 """
 
 from pcap_ai_parser.features.payload_features import (
@@ -26,6 +27,15 @@ from pcap_ai_parser.features.context_ioc_features import (
     extract_unified_packet_features,
 )
 
+from pcap_ai_parser.features.tls_features import (
+    TLSFeatures,
+    TLS_HANDSHAKE_TYPES,
+    TLS_RECORD_TYPES,
+    TLS_VERSIONS,
+    extract_tls_features,
+    is_tls_record,
+)
+
 __all__ = [
     # Payload Characteristics
     "PayloadCharacteristics",
@@ -43,4 +53,11 @@ __all__ = [
     "extract_ioc_features",
     "extract_encoding_features",
     "extract_unified_packet_features",
+    # TLS Features & Routing Path
+    "TLSFeatures",
+    "TLS_RECORD_TYPES",
+    "TLS_HANDSHAKE_TYPES",
+    "TLS_VERSIONS",
+    "is_tls_record",
+    "extract_tls_features",
 ]

@@ -14,6 +14,7 @@ from pcap_ai_parser.features import (
     IOCFeatures,
     PayloadCharacteristics,
     ProtocolContextFeatures,
+    TLSFeatures,
     UnifiedPacketFeatures,
     calculate_payload_size,
     calculate_printable_ascii_ratio,
@@ -23,7 +24,9 @@ from pcap_ai_parser.features import (
     extract_ioc_features,
     extract_payload_characteristics,
     extract_protocol_context,
+    extract_tls_features,
     extract_unified_packet_features,
+    is_tls_record,
 )
 
 __all__ = [
@@ -33,6 +36,7 @@ __all__ = [
     "ProtocolContextFeatures",
     "IOCFeatures",
     "EncodingFeatures",
+    "TLSFeatures",
     "UnifiedPacketFeatures",
     "calculate_payload_size",
     "calculate_shannon_entropy",
@@ -41,6 +45,8 @@ __all__ = [
     "extract_protocol_context",
     "extract_ioc_features",
     "extract_encoding_features",
+    "extract_tls_features",
     "extract_unified_packet_features",
     "extract_features_dict",
+    "is_tls_record",
 ]

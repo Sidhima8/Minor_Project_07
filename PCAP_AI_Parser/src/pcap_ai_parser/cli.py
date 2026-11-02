@@ -209,22 +209,31 @@ def inspect(pcap_file: str, packet_num: int) -> None:
     # Header Panel
     src = f"{target_rec.src_ip}:{target_rec.src_port}" if target_rec.src_port else target_rec.src_ip
     dst = f"{target_rec.dst_ip}:{target_rec.dst_port}" if target_rec.dst_port else target_rec.dst_ip
-    hdr_info = (
+    entropy_display = "Bypassed (TLS Encrypted)" if target_rec.entropy_excluded else f"{target_rec.payload_entropy:.4f}"
+    hdr_lines = [
         f"[bold]Packet #[/bold]{target_rec.packet_number}  |  "
         f"[bold]Proto:[/bold] {target_rec.transport_proto or target_rec.network_proto} ({target_rec.app_proto or 'Unknown App'})  |  "
         f"[bold]Category:[/bold] {target_rec.protocol_category}  |  "
-        f"[bold]Wire Size:[/bold] {target_rec.wire_length} B\n"
+        f"[bold]Wire Size:[/bold] {target_rec.wire_length} B",
         f"[bold]Flow:[/bold] {src} -> {dst} "
-        f"({'Client->Server' if target_rec.is_client_to_server else 'Server->Client / Peer'})\n"
+        f"({'Client->Server' if target_rec.is_client_to_server else 'Server->Client / Peer'})",
         f"[bold]Flags:[/bold] {target_rec.tcp_flags or 'N/A'}  |  "
         f"[bold]Payload Size:[/bold] {target_rec.payload_size} bytes  |  "
-        f"[bold]Entropy:[/bold] {target_rec.payload_entropy:.4f}  |  "
-        f"[bold]Printable ASCII:[/bold] {target_rec.printable_ascii_ratio:.2%}\n"
+        f"[bold]Entropy:[/bold] {entropy_display}  |  "
+        f"[bold]Printable ASCII:[/bold] {target_rec.printable_ascii_ratio:.2%}",
         f"[bold]IOC Count:[/bold] {target_rec.total_ioc_count}  |  "
         f"[bold]Encodings:[/bold] Base64={'YES' if target_rec.has_base64 else 'NO'}, "
         f"URL={'YES' if target_rec.has_url_encoding else 'NO'}, "
-        f"Hex={'YES' if target_rec.has_hex_encoding else 'NO'}"
-    )
+        f"Hex={'YES' if target_rec.has_hex_encoding else 'NO'}",
+    ]
+    if target_rec.is_tls_record:
+        hdr_lines.append(
+            f"[bold cyan]TLS Metadata Path:[/bold cyan] Record={target_rec.tls_record_type}  |  "
+            f"Version={target_rec.tls_version}  |  "
+            f"SNI={target_rec.tls_sni or 'N/A'}  |  "
+            f"Entropy Status=Bypassed (TLS Ciphertext)"
+        )
+    hdr_info = "\n".join(hdr_lines)
     console.print(Panel(hdr_info, title=f"Packet #{target_rec.packet_number} Metadata", border_style="cyan"))
 
     artifacts = []

@@ -19,6 +19,10 @@ from pcap_ai_parser.features.payload_features import (
     PayloadCharacteristics,
     extract_payload_characteristics,
 )
+from pcap_ai_parser.features.tls_features import (
+    extract_tls_features,
+    is_tls_record,
+)
 from pcap_ai_parser.intelligence.ioc_extractor import IOCExtractor, IOCRecord
 
 # ── Protocol Category Mapping ────────────────────────────────────────────────
@@ -183,6 +187,13 @@ class UnifiedPacketFeatures:
     has_hex_encoding: bool
     hex_encoding_count: int
     total_encoded_artifacts: int
+
+    # TLS Record Handling & Routing Path
+    is_tls_record: bool = False
+    tls_record_type: str = ""
+    tls_version: str = ""
+    tls_sni: str = ""
+    entropy_excluded: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -429,10 +440,40 @@ def extract_unified_packet_features(
 
     ioc_features = extract_ioc_features(payload, decoded_texts=decoded_texts, extractor=ioc_extractor)
 
+    # 5. TLS Record Routing & Entropy Bypass Path
+    is_tls = is_tls_record(payload)
+    tls_record_type = ""
+    tls_version = ""
+    tls_sni = ""
+    entropy_excluded = False
+
+    if is_tls:
+        # Route to specialized TLS feature path
+        tls_feat = extract_tls_features(payload)
+        tls_record_type = tls_feat.record_type
+        tls_version = tls_feat.version
+        tls_sni = tls_feat.sni or ""
+        entropy_excluded = True
+        # Entropy is bypassed/adjusted for TLS records (excluded as primary indicator)
+        shannon_entropy = 0.0
+
+        if p_ctx.protocol_category == "OTHER":
+            p_ctx.protocol_category = "ENCRYPTED"
+        if not p_ctx.app_proto or p_ctx.app_proto == "UNKNOWN":
+            p_ctx.app_proto = "TLS"
+
+        # If SNI domain was extracted, ensure domain and total IOC count reflect it
+        if tls_sni and not any(ioc.value == tls_sni for ioc in ioc_features.extracted_iocs):
+            ioc_features.total_ioc_count += 1
+            ioc_features.domain_ioc_count += 1
+            ioc_features.has_iocs = True
+    else:
+        shannon_entropy = p_chars.shannon_entropy
+
     return UnifiedPacketFeatures(
         # Payload
         payload_size=p_chars.payload_size,
-        shannon_entropy=p_chars.shannon_entropy,
+        shannon_entropy=shannon_entropy,
         printable_ascii_ratio=p_chars.printable_ascii_ratio,
         is_empty=p_chars.is_empty,
         # Context
@@ -458,4 +499,10 @@ def extract_unified_packet_features(
         has_hex_encoding=enc_features.has_hex_encoding,
         hex_encoding_count=enc_features.hex_encoding_count,
         total_encoded_artifacts=enc_features.total_encoded_artifacts,
+        # TLS Routing Path
+        is_tls_record=is_tls,
+        tls_record_type=tls_record_type,
+        tls_version=tls_version,
+        tls_sni=tls_sni,
+        entropy_excluded=entropy_excluded,
     )

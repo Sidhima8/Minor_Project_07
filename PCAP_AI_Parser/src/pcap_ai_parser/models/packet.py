@@ -77,6 +77,13 @@ class PacketRecord:
     has_url_encoding: bool = False       # True if URL encoding detected
     has_hex_encoding: bool = False       # True if hex encoding detected
 
+    # ── Feature Engineering: TLS Record Handling & Routing Path ──────────
+    is_tls_record: bool = False          # True if payload contains a TLS record
+    tls_record_type: str = ""            # "Handshake", "ApplicationData", "Alert", etc.
+    tls_version: str = ""                # "TLS 1.2", "TLS 1.3", etc.
+    tls_sni: str = ""                    # Extracted SNI hostname
+    entropy_excluded: bool = False       # True if entropy is excluded/bypassed as an anomaly indicator
+
     # ── Parse provenance ─────────────────────────────────────────────────
     parse_backend: str = ""         # "dpkt" | "tshark"
     parse_errors: list[str] = field(default_factory=list)

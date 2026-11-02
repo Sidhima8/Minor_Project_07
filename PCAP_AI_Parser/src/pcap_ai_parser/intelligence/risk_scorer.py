@@ -91,13 +91,18 @@ class HeuristicRiskScorer:
                 score += pts
                 findings.append(desc)
 
-        # 2. Entropy analysis
+        # 2. Entropy analysis (Bypassed / excluded for TLS records)
+        is_tls_record_payload = getattr(record, "is_tls_record", False) or getattr(record, "entropy_excluded", False)
+        if not is_tls_record_payload and record.payload:
+            from pcap_ai_parser.features.tls_features import is_tls_record
+            is_tls_record_payload = is_tls_record(record.payload)
+
         entropy_res = analyze_entropy(record.payload)
         entropy_val = entropy_res.entropy
 
-        # Only flag high entropy if not on standard TLS ports (443, 8443)
+        # Only flag high entropy as suspicious if NOT a TLS record and not on TLS ports
         is_tls_port = any(p in (443, 8443, 993, 995, 465) for p in ports)
-        if entropy_res.is_suspicious and not is_tls_port and len(record.payload) >= 32:
+        if entropy_res.is_suspicious and not is_tls_record_payload and not is_tls_port and len(record.payload) >= 32:
             score += 35
             findings.append(f"High entropy payload ({entropy_val} bits/byte) on non-TLS port -- possible shellcode/encryption")
 
